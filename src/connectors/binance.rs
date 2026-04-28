@@ -52,14 +52,11 @@ pub async fn test_loop_trades() -> anyhow::Result<()> {
     tracing::info!("websocket connected");
 
     while let Some(msg) = ws_stream.next().await {
-        match msg? {
-            Message::Text(text) => {
+        if let Message::Text(text) = msg? {
                 let deser_trade: BinanceTrade = serde_json::from_slice(text.as_bytes())?;
                 let trade: Trade = deser_trade.into();
                 tracing::debug!(?trade, "received trade");
             }
-            _ => {}
-        }
     }
     Ok(())
 
