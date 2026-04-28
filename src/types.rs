@@ -18,3 +18,10 @@ pub enum Exchange {Binance, Coinbase, Kraken}
 #[derive(Debug, Clone, Copy, Serialize, Deserialize)]
 pub enum Side {Buy, Sell}
 
+pub fn now_millis() -> u64 {
+    use std::time::{SystemTime, UNIX_EPOCH};
+    SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .expect("System clock before unix epoch")
+        .as_millis() as u64
+}
