@@ -11,8 +11,6 @@ static KRAKEN_MARKET_DATA_WS_URL: &str = "wss://ws.kraken.com/v2";
 enum KrakenMessage {
     #[serde(rename="trade")]
     Trade {
-        #[serde(rename="type")]
-        msg_type: String,  // "snapshot" or "update"
         data: Vec<KrakenTrade>,
     },
     #[serde(rename="heartbeat")]
@@ -79,7 +77,7 @@ pub async fn test_loop_trades() -> anyhow::Result<()> {
                 let msg: KrakenMessage = serde_json::from_value(value.clone())?;
                 
                 match msg {
-                    KrakenMessage::Trade {msg_type: _, data} => {
+                    KrakenMessage::Trade {data} => {
                         if !subscribed {
                             tracing::warn!("received trade before subscription ack");
                         }
