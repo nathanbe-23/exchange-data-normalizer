@@ -1,19 +1,17 @@
+use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
-use futures_util::{SinkExt, StreamExt};
 
-use crate::types::{Trade, Exchange, Side, now_millis};
+use crate::types::{Exchange, Side, Trade, now_millis};
 
 static KRAKEN_MARKET_DATA_WS_URL: &str = "wss://ws.kraken.com/v2";
 
 #[derive(Debug, Deserialize)]
-#[serde(tag="channel")]
+#[serde(tag = "channel")]
 enum KrakenMessage {
-    #[serde(rename="trade")]
-    Trade {
-        data: Vec<KrakenTrade>,
-    },
-    #[serde(rename="heartbeat")]
+    #[serde(rename = "trade")]
+    Trade { data: Vec<KrakenTrade> },
+    #[serde(rename = "heartbeat")]
     Heartbeat,
     #[serde(other)]
     Other,
@@ -22,24 +20,28 @@ enum KrakenMessage {
 #[derive(Debug, Deserialize)]
 struct KrakenTrade {
     symbol: String,
-    side: String,  // buy or sell
+    side: String, // buy or sell
     price: f64,
     qty: f64,
     timestamp: String, // ISO 8601
-    // ord_type: String, trade_id ignored for now (limit or market)
+                       // ord_type: String, trade_id ignored for now (limit or market)
 }
 
 impl From<KrakenTrade> for crate::types::Trade {
     fn from(trade: KrakenTrade) -> Self {
-        crate::types::Trade{
+        crate::types::Trade {
             exchange: Exchange::Kraken,
             symbol: trade.symbol,
             price: trade.price,
             quantity: trade.qty,
-            side: if trade.side == "buy" {Side::Buy} else {Side::Sell},
+            side: if trade.side == "buy" {
+                Side::Buy
+            } else {
+                Side::Sell
+            },
             exchange_ts_ms: chrono::DateTime::parse_from_rfc3339(&trade.timestamp)
                 .map(|dt| dt.timestamp_millis() as u64)
-                .unwrap_or(0),  // TODO: Surface error,
+                .unwrap_or(0), // TODO: Surface error,
             recv_ts_ms: now_millis(),
         }
     }
@@ -51,7 +53,9 @@ pub async fn test_loop_trades() -> anyhow::Result<()> {
         "method": "subscribe",
         "params": {"channel": "trade", "symbol": ["BTC/USD"]}
     });
-    ws_stream.send(Message::Text(subscribe.to_string().into())).await?;
+    ws_stream
+        .send(Message::Text(subscribe.to_string().into()))
+        .await?;
 
     let mut subscribed = false;
     // TODO: use last_hb_ts as liveness signal for reconnect
@@ -60,10 +64,13 @@ pub async fn test_loop_trades() -> anyhow::Result<()> {
         match ws_stream.next().await {
             Some(Ok(Message::Text(text))) => {
                 let value: serde_json::Value = serde_json::from_str(&text)?;
-                
+
                 // Subscription ACK - has no channel field
                 if value.get("method").and_then(|v| v.as_str()) == Some("subscribe") {
-                    let success = value.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+                    let success = value
+                        .get("success")
+                        .and_then(|v| v.as_bool())
+                        .unwrap_or(false);
                     if success {
                         tracing::info!("kraken subscription confirmed");
                         subscribed = true;
@@ -75,9 +82,9 @@ pub async fn test_loop_trades() -> anyhow::Result<()> {
 
                 // Otherwise process as typed enum KrakenMessage
                 let msg: KrakenMessage = serde_json::from_value(value.clone())?;
-                
+
                 match msg {
-                    KrakenMessage::Trade {data} => {
+                    KrakenMessage::Trade { data } => {
                         if !subscribed {
                             tracing::warn!("received trade before subscription ack");
                         }
@@ -93,10 +100,9 @@ pub async fn test_loop_trades() -> anyhow::Result<()> {
                     }
                     KrakenMessage::Other => {
                         tracing::debug!(?value, "unhandled message");
-    
                     }
                 }
-            },
+            }
             Some(Ok(_)) => continue,
             Some(Err(e)) => return Err(e.into()),
             None => anyhow::bail!("kraken stream closed before subscription confirmed"),
