@@ -49,14 +49,14 @@ fn normalize_symbol(symbol: &str) -> String {
 pub async fn test_loop_trades() -> anyhow::Result<()> {
     let url = format!("{}/ws/btcusdt@trade", BINANCE_SPOT_WS_URL);
     let (mut ws_stream, _) = connect_async(url).await?;
-    println!("Websocket client connected");
+    tracing::info!("websocket connected");
 
     while let Some(msg) = ws_stream.next().await {
         match msg? {
             Message::Text(text) => {
                 let deser_trade: BinanceTrade = serde_json::from_slice(text.as_bytes())?;
                 let trade: Trade = deser_trade.into();
-                println!("{:?}", trade);
+                tracing::debug!(?trade, "received trade");
             }
             _ => {}
         }
