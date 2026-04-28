@@ -47,7 +47,7 @@ impl From<KrakenTrade> for crate::types::Trade {
     }
 }
 
-pub async fn test_loop_trades() -> anyhow::Result<()> {
+pub async fn run() -> anyhow::Result<()> {
     let (mut ws_stream, _) = connect_async(KRAKEN_MARKET_DATA_WS_URL).await?;
     let subscribe = serde_json::json!({
         "method": "subscribe",

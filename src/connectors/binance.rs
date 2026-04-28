@@ -46,7 +46,7 @@ fn normalize_symbol(symbol: &str) -> String {
     }
 }
 
-pub async fn test_loop_trades() -> anyhow::Result<()> {
+pub async fn run() -> anyhow::Result<()> {
     let url = format!("{}/ws/btcusdt@trade", BINANCE_SPOT_WS_URL);
     let (mut ws_stream, _) = connect_async(url).await?;
     tracing::info!("websocket connected");

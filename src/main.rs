@@ -11,7 +11,7 @@ async fn main() -> anyhow::Result<()> {
         .init();
 
     let (binance_result, kraken_result) =
-        tokio::join!(binance::test_loop_trades(), kraken::test_loop_trades(),);
+        tokio::join!(binance::run(), kraken::run(),);
     binance_result?;
     kraken_result?;
     Ok(())
