@@ -8,13 +8,12 @@ async fn main() -> anyhow::Result<()>{
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,exchange_data_normalizer=debug".into()),
         ).init();
-    
-    let _ = kraken::test_loop_trades().await?;
-    // let (binance_result, kraken_result) = tokio::join!(
-    //     binance::test_loop_trades(),
-    //     kraken::test_loop_trades(),
-    // );
-    // binance_result?;
-    // kraken_result?;
+
+    let (binance_result, kraken_result) = tokio::join!(
+        binance::test_loop_trades(),
+        kraken::test_loop_trades(),
+    );
+    binance_result?;
+    kraken_result?;
     Ok(())
 }
