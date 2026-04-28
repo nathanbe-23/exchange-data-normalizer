@@ -1,5 +1,3 @@
-use std::any;
-
 use serde::Deserialize;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 use futures_util::{SinkExt, StreamExt};
@@ -58,29 +56,48 @@ pub async fn test_loop_trades() -> anyhow::Result<()> {
     ws_stream.send(Message::Text(subscribe.to_string().into())).await?;
 
     let mut subscribed = false;
+    // TODO: use last_hb_ts as liveness signal for reconnect
+    let mut _last_hb_ts: u64 = 0;
     loop {
         match ws_stream.next().await {
             Some(Ok(Message::Text(text))) => {
                 let value: serde_json::Value = serde_json::from_str(&text)?;
-
-                if value.get("channel") == Some(&serde_json::json!("status")) {
-                    tracing::info!(?value, "kraken status received");
-                    continue;
-                }
-                if value.get("method") == Some(&serde_json::json!("subscribe"))
-                    && value.get("success") == Some(&serde_json::json!(true))
-                {
-                    tracing::info!("kraken subscription confirmed");
-                    subscribed = true;
-                    continue;
-                } else if value.get("method") == Some(&serde_json::json!("subscribe")) {
-                        anyhow::bail!("Kraken subscription failed: {:?}", text);
-                }
                 
-                if subscribed && value.get("channel") == Some(&serde_json::json!("trade")) {
-                    tracing::info!("Got trade")
+                // Subscription ACK - has no channel field
+                if value.get("method").and_then(|v| v.as_str()) == Some("subscribe") {
+                    let success = value.get("success").and_then(|v| v.as_bool()).unwrap_or(false);
+                    if success {
+                        tracing::info!("kraken subscription confirmed");
+                        subscribed = true;
+                    } else {
+                        anyhow::bail!("Kraken subscription failed: {:?}", text);
+                    }
+                    continue;
                 }
-                tracing::warn!(?value, "unexpected message");
+
+                // Otherwise process as typed enum KrakenMessage
+                let msg: KrakenMessage = serde_json::from_value(value.clone())?;
+                
+                match msg {
+                    KrakenMessage::Trade {msg_type: _, data} => {
+                        if !subscribed {
+                            tracing::warn!("received trade before subscription ack");
+                        }
+                        for raw_trade in data {
+                            let trade: Trade = raw_trade.into();
+                            tracing::debug!(?trade, "received trade");
+                        }
+                    }
+                    KrakenMessage::Heartbeat => {
+                        _last_hb_ts = now_millis();
+                        tracing::trace!("heartbeat");
+                        continue;
+                    }
+                    KrakenMessage::Other => {
+                        tracing::debug!(?value, "unhandled message");
+    
+                    }
+                }
             },
             Some(Ok(_)) => continue,
             Some(Err(e)) => return Err(e.into()),
