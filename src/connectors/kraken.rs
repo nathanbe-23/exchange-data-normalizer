@@ -127,62 +127,96 @@ async fn run_session(tx: &mpsc::Sender<Trade>) -> anyhow::Result<()> {
         tokio::select! {
             maybe_msg = ws_stream.next() => {
                 match maybe_msg {
-                    Some(Ok(Message::Text(text))) => {
-                        let value: serde_json::Value = serde_json::from_str(&text)?;
-
-                        // Subscription ACK - has no channel field
-                        if value.get("method").and_then(|v| v.as_str()) == Some("subscribe") {
-                            let success = value
-                                .get("success")
-                                .and_then(|v| v.as_bool())
-                                .unwrap_or(false);
-                            if success {
-                                tracing::info!("kraken subscription confirmed");
-                                subscribed = true;
-                            } else {
-                                anyhow::bail!("Kraken subscription failed: {:?}", text);
-                            }
-                            continue;
-                        }
-
-                        // Otherwise process as typed enum KrakenMessage
-                        let msg: KrakenMessage = serde_json::from_value(value.clone())?;
-
-                        match msg {
-                            KrakenMessage::Trade { data } => {
-                                if !subscribed {
-                                    tracing::warn!("received trade before subscription ack");
-                                }
-                                for raw_trade in data {
-                                    let trade: Trade = raw_trade.into();
-                                    if let Err(tokio::sync::mpsc::error::TrySendError::Full(_))= tx.try_send(trade) {
-                                        // Publisher is behind. Drop newest (this trade) rather than block,
-                                        // which backs up the into WS and cause exchange-side disconnect for slow
-                                        // consumers
-                                        // TODO: switch to drop oldest semantics for better freshness .
-                                        tracing::warn!("publisher channel full, dropping trade");
-                                    }
-                                }
-                            }
-                            KrakenMessage::Heartbeat => {
-                                _last_hb_ts = now_millis();
-                                tracing::trace!("heartbeat");
-                                continue;
-                            }
-                            KrakenMessage::Other => {
-                                tracing::debug!(?value, "unhandled message");
-                            }
-                        }
-                    }
+                    Some(Ok(Message::Text(text))) => handle_message(&text, tx, &mut subscribed, &mut _last_hb_ts).await?,
                     Some(Ok(_)) => continue,
                     Some(Err(e)) => return Err(e.into()),
-                    None => anyhow::bail!("kraken stream closed before subscription confirmed"),
+                    None => return Ok(()), // Stream ended, outer loop reconnects
                 }
 
             }
             _ = sleep(KRAKEN_LIVENESS_TIMEOUT) => {
                 anyhow::bail!("no messages from kraken in {:?}, treating as dead", KRAKEN_LIVENESS_TIMEOUT);
             }
+        }
+    }
+}
+
+async fn handle_message(
+    text: &str,
+    tx: &mpsc::Sender<Trade>,
+    subscribed: &mut bool,  // write on ack
+    _last_hb_ts: &mut u64,
+
+) -> anyhow::Result<()> {
+    match parse_message(&text)? {
+        DispatchedMessage::SubscriptionAck { success, text } => {
+            if success {
+                tracing::info!("Kraken subscription confirmed");
+                *subscribed = true;
+            } else {
+                anyhow::bail!("Kraken subscription failed: {}", text);
+            }
+        }
+        DispatchedMessage::KrakenChannel(KrakenMessage::Trade { data }) => {
+            dispatch_trades(data, tx, *subscribed).await;
+        },
+        DispatchedMessage::KrakenChannel(KrakenMessage::Heartbeat) => {
+            *_last_hb_ts = now_millis();
+            tracing::trace!("heartbeat");
+        },
+        DispatchedMessage::KrakenChannel(KrakenMessage::Other) => {},
+        DispatchedMessage::Unknown(value) => {
+            tracing::debug!(?value, "unknown kraken message");
+        },
+    }
+    Ok(())
+}
+
+enum DispatchedMessage {
+    KrakenChannel(KrakenMessage),
+    SubscriptionAck {success:bool, text: String},
+    Unknown(serde_json::Value),
+}
+
+fn parse_message(text: &str) -> anyhow::Result<DispatchedMessage> {
+    let value: serde_json::Value = serde_json::from_str(&text)?;
+    
+    // Subscription ACK - has no channel field
+    if value.get("method").and_then(|v| v.as_str()) == Some("subscribe") {
+        let success = value
+            .get("success")
+            .and_then(|v| v.as_bool())
+            .unwrap_or(false);
+        return Ok(DispatchedMessage::SubscriptionAck { 
+            success, 
+            text: (text.to_string()), // for error logging
+        });
+    }
+
+    // try typed enum
+
+    match serde_json::from_value::<KrakenMessage>(value.clone()) {
+        Ok(msg) => Ok(DispatchedMessage::KrakenChannel(msg)),
+        Err(_) => Ok(DispatchedMessage::Unknown(value)),
+    }
+}
+
+async fn dispatch_trades(
+    trades: Vec<KrakenTrade>,
+    tx: &mpsc::Sender<Trade>,
+    subscribed: bool,  // copy - only read
+) {
+    if !subscribed {
+        tracing::warn!("received trade before subscription ack");
+    }
+    for kt in trades {
+        let trade: Trade = kt.into();
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_))= tx.try_send(trade) {
+            // Publisher is behind. Drop newest (this trade) rather than block,
+            // which backs up the into WS and cause exchange-side disconnect for slow
+            // consumers
+            // TODO: switch to drop oldest semantics for better freshness .
+            tracing::warn!("publisher channel full, dropping trade");
         }
     }
 }
