@@ -6,6 +6,7 @@ use tokio::sync::mpsc;
 async fn main() -> anyhow::Result<()> {
     // Tracing setup
     tracing_subscriber::fmt()
+        .with_writer(std::io::stderr)
         .with_env_filter(
             tracing_subscriber::EnvFilter::try_from_default_env()
                 .unwrap_or_else(|_| "info,exchange_data_normalizer=debug".into()),
