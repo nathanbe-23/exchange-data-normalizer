@@ -144,11 +144,10 @@ async fn run_session(tx: &mpsc::Sender<Trade>) -> anyhow::Result<()> {
 async fn handle_message(
     text: &str,
     tx: &mpsc::Sender<Trade>,
-    subscribed: &mut bool,  // write on ack
+    subscribed: &mut bool, // write on ack
     _last_hb_ts: &mut u64,
-
 ) -> anyhow::Result<()> {
-    match parse_message(&text)? {
+    match parse_message(text)? {
         DispatchedMessage::SubscriptionAck { success, text } => {
             if success {
                 tracing::info!("Kraken subscription confirmed");
@@ -159,36 +158,36 @@ async fn handle_message(
         }
         DispatchedMessage::KrakenChannel(KrakenMessage::Trade { data }) => {
             dispatch_trades(data, tx, *subscribed).await;
-        },
+        }
         DispatchedMessage::KrakenChannel(KrakenMessage::Heartbeat) => {
             *_last_hb_ts = now_millis();
             tracing::trace!("heartbeat");
-        },
-        DispatchedMessage::KrakenChannel(KrakenMessage::Other) => {},
+        }
+        DispatchedMessage::KrakenChannel(KrakenMessage::Other) => {}
         DispatchedMessage::Unknown(value) => {
             tracing::debug!(?value, "unknown kraken message");
-        },
+        }
     }
     Ok(())
 }
 
 enum DispatchedMessage {
     KrakenChannel(KrakenMessage),
-    SubscriptionAck {success:bool, text: String},
+    SubscriptionAck { success: bool, text: String },
     Unknown(serde_json::Value),
 }
 
 fn parse_message(text: &str) -> anyhow::Result<DispatchedMessage> {
-    let value: serde_json::Value = serde_json::from_str(&text)?;
-    
+    let value: serde_json::Value = serde_json::from_str(text)?;
+
     // Subscription ACK - has no channel field
     if value.get("method").and_then(|v| v.as_str()) == Some("subscribe") {
         let success = value
             .get("success")
             .and_then(|v| v.as_bool())
             .unwrap_or(false);
-        return Ok(DispatchedMessage::SubscriptionAck { 
-            success, 
+        return Ok(DispatchedMessage::SubscriptionAck {
+            success,
             text: (text.to_string()), // for error logging
         });
     }
@@ -204,14 +203,14 @@ fn parse_message(text: &str) -> anyhow::Result<DispatchedMessage> {
 async fn dispatch_trades(
     trades: Vec<KrakenTrade>,
     tx: &mpsc::Sender<Trade>,
-    subscribed: bool,  // copy - only read
+    subscribed: bool, // copy - only read
 ) {
     if !subscribed {
         tracing::warn!("received trade before subscription ack");
     }
     for kt in trades {
         let trade: Trade = kt.into();
-        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_))= tx.try_send(trade) {
+        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(trade) {
             // Publisher is behind. Drop newest (this trade) rather than block,
             // which backs up the into WS and cause exchange-side disconnect for slow
             // consumers
