@@ -23,6 +23,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
@@ -72,11 +73,11 @@ impl From<KrakenTrade> for crate::types::Trade {
     }
 }
 
-pub async fn run() -> anyhow::Result<()> {
+pub async fn run(tx: mpsc::Sender<Trade>) -> anyhow::Result<()> {
     let mut backoff = backoff_initial();
 
     loop {
-        match run_session().await {
+        match run_session(&tx).await {
             Ok(()) => {
                 // Stream emded cleanly (rare) -> reset backoff and reconnect
                 tracing::warn!("kraken session ended cleanly, reconnecting");
@@ -109,7 +110,7 @@ fn next_backoff(current: Duration) -> Duration {
     Duration::from_millis(doubled.saturating_add(jitter))
 }
 
-async fn run_session() -> anyhow::Result<()> {
+async fn run_session(tx: &mpsc::Sender<Trade>) -> anyhow::Result<()> {
     let (mut ws_stream, _) = connect_async(KRAKEN_MARKET_DATA_WS_URL).await?;
     let subscribe = serde_json::json!({
         "method": "subscribe",
@@ -154,7 +155,13 @@ async fn run_session() -> anyhow::Result<()> {
                                 }
                                 for raw_trade in data {
                                     let trade: Trade = raw_trade.into();
-                                    tracing::debug!(?trade, "received trade");
+                                    if let Err(tokio::sync::mpsc::error::TrySendError::Full(_))= tx.try_send(trade) {
+                                        // Publisher is behind. Drop newest (this trade) rather than block,
+                                        // which backs up the into WS and cause exchange-side disconnect for slow
+                                        // consumers
+                                        // TODO: switch to drop oldest semantics for better freshness .
+                                        tracing::warn!("publisher channel full, dropping trade");
+                                    }
                                 }
                             }
                             KrakenMessage::Heartbeat => {

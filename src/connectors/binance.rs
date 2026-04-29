@@ -25,6 +25,7 @@
 use serde::Deserialize;
 
 use futures_util::StreamExt;
+use tokio::sync::mpsc;
 use tokio::time::{Duration, sleep};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
@@ -72,11 +73,11 @@ fn normalize_symbol(symbol: &str) -> String {
     }
 }
 
-pub async fn run() -> anyhow::Result<()> {
+pub async fn run(tx: mpsc::Sender<Trade>) -> anyhow::Result<()> {
     let mut backoff = backoff_initial();
 
     loop {
-        match run_session().await {
+        match run_session(&tx).await {
             Ok(()) => {
                 // Stream emded cleanly (rare) -> reset backoff and reconnect
                 tracing::warn!("binance session ended cleanly, reconnecting");
@@ -108,7 +109,7 @@ fn next_backoff(current: Duration) -> Duration {
     Duration::from_millis(doubled.saturating_add(jitter))
 }
 
-pub async fn run_session() -> anyhow::Result<()> {
+pub async fn run_session(tx: &mpsc::Sender<Trade>) -> anyhow::Result<()> {
     let url = format!("{}/ws/btcusdt@trade", BINANCE_SPOT_WS_URL);
     let (mut ws_stream, _) = connect_async(url).await?;
     tracing::info!("websocket connected");
@@ -120,7 +121,14 @@ pub async fn run_session() -> anyhow::Result<()> {
                     Some(Ok(Message::Text(text))) => {
                         let deser_trade: BinanceTrade = serde_json::from_slice(text.as_bytes())?;
                         let trade: Trade = deser_trade.into();
-                        tracing::debug!(?trade, "received trade");
+
+                        if let Err(tokio::sync::mpsc::error::TrySendError::Full(_))= tx.try_send(trade) {
+                            // Publisher is behind. Drop newest (this trade) rather than block,
+                            // which backs up the into WS and cause exchange-side disconnect for slow
+                            // consumers
+                            // TODO: switch to drop oldest semantics for better freshness .
+                            tracing::warn!("publisher channel full, dropping trade");
+                        }
                     }
                     Some(Ok(Message::Ping(payload))) => {
                         tracing::debug!(payload = ?payload, "binance ping");

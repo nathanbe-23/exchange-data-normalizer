@@ -63,3 +63,16 @@ should treat snapshots as authoritative — if you maintain stateful
 derivations (e.g., reconstructed order books in future versions), reset
 that state on snapshot. v1 publishes both snapshot and update trades
 identically, since for trades both are real market events.
+
+
+### Backpressure
+
+Connectors push canonical trades onto a bounded MPSC channel (capacity
+10,000). When the channel is full — meaning the publisher cannot keep up
+with the inbound rate — connectors **drop the new trade rather than
+block**. Blocking would back up into the WebSocket read loop, causing
+exchange-side disconnects for "slow consumer" reasons.
+
+This is a deliberately simple policy for v1. A more correct policy is
+**drop-oldest** (preserve the freshest data), which requires either a
+custom channel implementation or a different crate.
