@@ -220,7 +220,6 @@ async fn dispatch_trades(
     }
 }
 
-
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -284,9 +283,8 @@ mod tests {
             _ => panic!("expected correct trade"),
         }
     }
-    
 
-     #[test]
+    #[test]
     fn parse_message_heartbeat() {
         let text = r#"{"channel": "heartbeat"}"#;
         match parse_message(text).unwrap() {
@@ -312,7 +310,7 @@ mod tests {
         assert!(parse_message(text).is_err());
     }
 
-     // --- Trade conversion sanity ---
+    // --- Trade conversion sanity ---
 
     #[test]
     fn kraken_trade_converts_to_canonical_trade() {

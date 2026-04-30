@@ -177,7 +177,7 @@ mod tests {
         assert_eq!(deserialized_t.quantity, "100");
         assert!(deserialized_t.maker);
     }
-    
+
     #[test]
     fn parse_message_trade_conversion() {
         let d_trade = BinanceTrade {
@@ -198,5 +198,4 @@ mod tests {
     // - maker = false maps to Side::Buy (companion to existing maker=true → Sell test)
     // - malformed JSON returns Err
     // - missing required field (e.g., no "p") returns Err
-
 }
