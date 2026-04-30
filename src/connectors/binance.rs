@@ -153,3 +153,50 @@ pub async fn run_session(tx: &mpsc::Sender<Trade>) -> anyhow::Result<()> {
         }
     }
 }
+
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parse_message_deserialization() {
+        let text = r#"{
+            "e": "trade",           
+            "E": 1672515782136,     
+            "s": "BTCUSDT",        
+            "t": 12345,            
+            "p": "0.001",          
+            "q": "100",            
+            "T": 1672515782136,     
+            "m": true,              
+            "M": true               
+        }"#;
+
+        let deserialized_t: BinanceTrade = serde_json::from_slice(text.as_bytes()).unwrap();
+        assert_eq!(deserialized_t.symbol, "BTCUSDT");
+        assert_eq!(deserialized_t.price, "0.001");
+        assert_eq!(deserialized_t.quantity, "100");
+        assert!(deserialized_t.maker);
+    }
+    
+    #[test]
+    fn parse_message_trade_conversion() {
+        let d_trade = BinanceTrade {
+            symbol: "BTCUSDT".to_string(),
+            price: "0.001".to_string(),
+            quantity: "100".to_string(),
+            timestamp: 1672515782136,
+            maker: true,
+        };
+        let trade: Trade = d_trade.into();
+        assert_eq!(trade.symbol, "BTC/USDT");
+        assert_eq!(trade.price, 0.001);
+        assert_eq!(trade.quantity, 100_f64);
+        assert_eq!(trade.side, Side::Sell);
+    }
+
+    // TODO: additional Binance parse tests:
+    // - maker = false maps to Side::Buy (companion to existing maker=true → Sell test)
+    // - malformed JSON returns Err
+    // - missing required field (e.g., no "p") returns Err
+
+}
