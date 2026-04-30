@@ -11,14 +11,14 @@ pub struct Trade {
     pub recv_ts_ms: u64,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum Exchange {
     Binance,
     Coinbase,
     Kraken,
 }
 
-#[derive(Debug, Clone, Copy, Serialize, Deserialize)]
+#[derive(Debug, Clone, Copy, Serialize, Deserialize, PartialEq)]
 pub enum Side {
     Buy,
     Sell,

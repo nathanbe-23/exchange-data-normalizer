@@ -219,3 +219,114 @@ async fn dispatch_trades(
         }
     }
 }
+
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    // --- Subscription ack ---
+
+    #[test]
+    fn parse_message_sub_ack_success() {
+        let text = r#"{"method": "subscribe", "success": true}"#;
+        match parse_message(text).unwrap() {
+            DispatchedMessage::SubscriptionAck { success, .. } => assert!(success),
+            _ => panic!("expected ack"),
+        }
+    }
+
+    #[test]
+    fn parse_message_sub_ack_failure() {
+        let text = r#"{"method": "subscribe", "success": false, "error": "Currency pair not supported BTCCC/USD"}"#;
+        match parse_message(text).unwrap() {
+            DispatchedMessage::SubscriptionAck { success, .. } => assert!(!success),
+            _ => panic!("expected ack"),
+        }
+    }
+
+    // --- Channel msgs ---
+
+    #[test]
+    fn parse_message_trade_snapshot() {
+        let text = r#"{
+            "channel": "trade",
+            "type": "snapshot",
+            "data": [
+                {"symbol":"BTC/USD","side":"buy","price":76290.01,"qty":0.00411,"ord_type":"limit","trade_id":1,"timestamp":"2026-01-01T12:00:00.000000Z"},
+                {"symbol":"BTC/USD","side":"sell","price":76290.01,"qty":0.0057,"ord_type":"market","trade_id":2,"timestamp":"2026-01-01T12:00:01.000000Z"}
+            ]
+        }"#;
+        match parse_message(text).unwrap() {
+            DispatchedMessage::KrakenChannel(KrakenMessage::Trade { data }) => {
+                assert_eq!(data.len(), 2)
+            }
+            _ => panic!("expected 2 trades"),
+        }
+    }
+
+    #[test]
+    fn parse_message_trade_update_single() {
+        let text = r#"{
+            "channel": "trade",
+            "type": "update",
+            "data": [
+                {"symbol":"BTC/USD","side":"buy","price":76290.5,"qty":0.004,"ord_type":"market","trade_id":42,"timestamp":"2026-01-01T12:00:00.000000Z"}
+            ]
+        }"#;
+
+        match parse_message(text).unwrap() {
+            DispatchedMessage::KrakenChannel(KrakenMessage::Trade { data }) => {
+                assert_eq!(data.len(), 1);
+                assert_eq!(data[0].symbol, "BTC/USD");
+                assert_eq!(data[0].side, "buy");
+            }
+            _ => panic!("expected correct trade"),
+        }
+    }
+    
+
+     #[test]
+    fn parse_message_heartbeat() {
+        let text = r#"{"channel": "heartbeat"}"#;
+        match parse_message(text).unwrap() {
+            DispatchedMessage::KrakenChannel(KrakenMessage::Heartbeat) => {}
+            _ => panic!("expected heartbeat"),
+        }
+    }
+
+    #[test]
+    fn parse_message_status_falls_through_to_unknown_or_other() {
+        // Status messages have channel = "status" which doesn't match Trade or Heartbeat.
+        // With #[serde(other)] on KrakenMessage, this becomes Other.
+        let text = r#"{"channel":"status","type":"update","data":[{"system":"online"}]}"#;
+        match parse_message(text).unwrap() {
+            DispatchedMessage::KrakenChannel(KrakenMessage::Other) => {}
+            _ => panic!("expected Other"),
+        }
+    }
+
+    #[test]
+    fn parse_message_malformed_json_errors() {
+        let text = r#"{"channel": "trade", "data": [malformed]}"#;
+        assert!(parse_message(text).is_err());
+    }
+
+     // --- Trade conversion sanity ---
+
+    #[test]
+    fn kraken_trade_converts_to_canonical_trade() {
+        let kt = KrakenTrade {
+            symbol: "BTC/USD".to_string(),
+            side: "buy".to_string(),
+            price: 50000.5,
+            qty: 0.001,
+            timestamp: "2024-01-01T12:00:00.000Z".to_string(),
+        };
+        let trade: Trade = kt.into();
+        assert_eq!(trade.exchange, Exchange::Kraken);
+        assert_eq!(trade.symbol, "BTC/USD");
+        assert!(matches!(trade.side, Side::Buy));
+        assert_eq!(trade.price, 50000.5);
+    }
+}
