@@ -1,18 +1,15 @@
 use std::time::Duration;
 
-use exchange_data_normalizer::types::Trade;
 use exchange_data_normalizer::connectors::binance;
+use exchange_data_normalizer::types::Trade;
 
+use futures_util::SinkExt;
 use tokio::net::TcpListener;
 use tokio::sync::mpsc;
 use tokio_tungstenite::{accept_async, tungstenite};
-use futures_util::SinkExt;
-
-
 
 #[tokio::test]
 async fn binance_connector_streams_canonical_trades() {
-
     let _ = tracing_subscriber::fmt()
         .with_writer(std::io::stderr)
         .with_max_level(tracing::Level::DEBUG)
@@ -27,7 +24,9 @@ async fn binance_connector_streams_canonical_trades() {
         let (stream, _) = listener.accept().await.unwrap();
         let mut ws = accept_async(stream).await.unwrap();
         let trade_str = r#"{"s": "BTCUSDT", "p": "85000.1", "q": "0.001", "T": 1, "m": false}"#;
-        ws.send(tungstenite::Message::Text(trade_str.into())).await.unwrap();
+        ws.send(tungstenite::Message::Text(trade_str.into()))
+            .await
+            .unwrap();
     });
 
     // Link connector to server, read message and parse trade
@@ -35,7 +34,7 @@ async fn binance_connector_streams_canonical_trades() {
 
     // run connector and receiver concurrently
     tokio::select! {
-        
+
         // receiver returns first when trade arrives
         Some(trade) = rx.recv() => {
             tracing::info!("received trade from server");
@@ -54,5 +53,4 @@ async fn binance_connector_streams_canonical_trades() {
         }
 
     }
-
 }

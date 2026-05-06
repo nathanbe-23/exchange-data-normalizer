@@ -210,17 +210,16 @@ mod tests {
     }
 
     #[test]
-    fn parse_message_wrong_json(){
+    fn parse_message_wrong_json() {
         // value of key 's' is not a string
         let json_text: &str = r#"{"e": "trade", "s": BTCUSDT}"#;
         assert!(serde_json::from_slice::<BinanceTrade>(json_text.as_bytes()).is_err());
     }
 
     #[test]
-    fn parse_message_missing_field(){
+    fn parse_message_missing_field() {
         // field p is missing and is required for BinanceTrade
         let json_text: &str = r#"{"s": "BTCUSDT", "q": "0.001", "T": 1, "m": false}"#;
         assert!(serde_json::from_slice::<BinanceTrade>(json_text.as_bytes()).is_err());
     }
-
 }
