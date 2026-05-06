@@ -1,6 +1,7 @@
 use exchange_data_normalizer::connectors::{binance, kraken};
 use exchange_data_normalizer::publisher;
 use tokio::sync::mpsc;
+use metrics_exporter_prometheus::PrometheusBuilder;
 
 #[tokio::main]
 async fn main() -> anyhow::Result<()> {
@@ -12,6 +13,16 @@ async fn main() -> anyhow::Result<()> {
                 .unwrap_or_else(|_| "info,exchange_data_normalizer=debug".into()),
         )
         .init();
+
+    // Setup prometheus server
+    PrometheusBuilder::new()
+        .with_http_listener(([127, 0, 0, 1], 9090))
+        .install()
+        .expect("failed to install prometheus exporter");
+    
+    tracing::info!("metrics endpoint listening on 127.0.0.1:9090/metrics");
+
+    
 
     // Bounded channel: drop-oldest backpressure if publisher falls behind (currently newest, still TODO)
     let (tx, rx) = mpsc::channel(10_000);

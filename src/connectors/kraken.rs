@@ -84,6 +84,7 @@ pub async fn run(tx: mpsc::Sender<Trade>, ws_url: &str) -> anyhow::Result<()> {
                 backoff = backoff_initial();
             }
             Err(e) => {
+                metrics::counter!("reconnect_count_total", "exchange" => "kraken").increment(1);
                 tracing::warn!(error= %e, backoff_ms = backoff.as_millis(), "kraken session failed");
                 tokio::time::sleep(backoff).await;
                 backoff = next_backoff(backoff);
@@ -210,11 +211,17 @@ async fn dispatch_trades(
     }
     for kt in trades {
         let trade: Trade = kt.into();
+
+        metrics::counter!("trades_received_total", "exchange" => "kraken").increment(1);
+        metrics::histogram!("e2e_latency_ms", "exchange" => "kraken")
+            .record((trade.recv_ts_ms - trade.exchange_ts_ms) as f64);
+
         if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(trade) {
             // Publisher is behind. Drop newest (this trade) rather than block,
             // which backs up the into WS and cause exchange-side disconnect for slow
             // consumers
             // TODO: switch to drop oldest semantics for better freshness .
+            metrics::counter!("trades_dropped_total", "exchange" => "kraken").increment(1);
             tracing::warn!("publisher channel full, dropping trade");
         }
     }
