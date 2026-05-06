@@ -32,7 +32,7 @@ use tokio_tungstenite::tungstenite::Message;
 
 use crate::types::{Exchange, Side, Trade, now_millis};
 
-static BINANCE_SPOT_WS_URL: &str = "wss://stream.binance.com:9443";
+pub const BINANCE_SPOT_WS_URL: &str = "wss://stream.binance.com:9443";
 const BINANCE_LIVENESS_TIMEOUT: Duration = Duration::from_secs(240);
 
 #[derive(Debug, Deserialize)]
@@ -74,11 +74,11 @@ fn normalize_symbol(symbol: &str) -> String {
     }
 }
 
-pub async fn run(tx: mpsc::Sender<Trade>) -> anyhow::Result<()> {
+pub async fn run(tx: mpsc::Sender<Trade>, ws_url: &str) -> anyhow::Result<()> {
     let mut backoff = backoff_initial();
 
     loop {
-        match run_session(&tx).await {
+        match run_session(&tx, ws_url).await {
             Ok(()) => {
                 // Stream emded cleanly (rare) -> reset backoff and reconnect
                 tracing::warn!("binance session ended cleanly, reconnecting");
@@ -110,8 +110,8 @@ fn next_backoff(current: Duration) -> Duration {
     Duration::from_millis(doubled.saturating_add(jitter))
 }
 
-pub async fn run_session(tx: &mpsc::Sender<Trade>) -> anyhow::Result<()> {
-    let url = format!("{}/ws/btcusdt@trade", BINANCE_SPOT_WS_URL);
+pub async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<()> {
+    let url = format!("{}/ws/btcusdt@trade", url);
     let (mut ws_stream, _) = connect_async(url).await?;
     tracing::info!("websocket connected");
 

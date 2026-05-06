@@ -29,7 +29,7 @@ use tokio_tungstenite::{connect_async, tungstenite::Message};
 
 use crate::types::{Exchange, Side, Trade, now_millis};
 
-static KRAKEN_MARKET_DATA_WS_URL: &str = "wss://ws.kraken.com/v2";
+pub const KRAKEN_MARKET_DATA_WS_URL: &str = "wss://ws.kraken.com/v2";
 const KRAKEN_LIVENESS_TIMEOUT: Duration = Duration::from_secs(15);
 
 #[derive(Debug, Deserialize)]
@@ -73,11 +73,11 @@ impl From<KrakenTrade> for crate::types::Trade {
     }
 }
 
-pub async fn run(tx: mpsc::Sender<Trade>) -> anyhow::Result<()> {
+pub async fn run(tx: mpsc::Sender<Trade>, ws_url: &str) -> anyhow::Result<()> {
     let mut backoff = backoff_initial();
 
     loop {
-        match run_session(&tx).await {
+        match run_session(&tx, ws_url).await {
             Ok(()) => {
                 // Stream emded cleanly (rare) -> reset backoff and reconnect
                 tracing::warn!("kraken session ended cleanly, reconnecting");
@@ -110,8 +110,8 @@ fn next_backoff(current: Duration) -> Duration {
     Duration::from_millis(doubled.saturating_add(jitter))
 }
 
-async fn run_session(tx: &mpsc::Sender<Trade>) -> anyhow::Result<()> {
-    let (mut ws_stream, _) = connect_async(KRAKEN_MARKET_DATA_WS_URL).await?;
+async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<()> {
+    let (mut ws_stream, _) = connect_async(url).await?;
     let subscribe = serde_json::json!({
         "method": "subscribe",
         "params": {"channel": "trade", "symbol": ["BTC/USD"]}

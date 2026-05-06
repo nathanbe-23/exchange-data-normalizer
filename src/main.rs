@@ -17,8 +17,8 @@ async fn main() -> anyhow::Result<()> {
     let (tx, rx) = mpsc::channel(10_000);
 
     let publisher_task = tokio::spawn(publisher::run(rx));
-    let binance_task = tokio::spawn(binance::run(tx.clone()));
-    let kraken_task = tokio::spawn(kraken::run(tx.clone()));
+    let binance_task = tokio::spawn(binance::run(tx.clone(), binance::BINANCE_SPOT_WS_URL));
+    let kraken_task = tokio::spawn(kraken::run(tx.clone(), kraken::KRAKEN_MARKET_DATA_WS_URL));
 
     drop(tx); // important: drop the original sender so the channel can close cleanly
     let _ = tokio::try_join!(
