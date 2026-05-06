@@ -31,3 +31,11 @@ pub fn now_millis() -> u64 {
         .expect("System clock before unix epoch")
         .as_millis() as u64
 }
+
+pub fn init_metrics(exchange_name: &str) {
+    metrics::counter!("trades_received_total", "exchange" => exchange_name.to_string())
+        .increment(0);
+    metrics::counter!("trades_dropped_total", "exchange" => exchange_name.to_string()).increment(0);
+    metrics::counter!("reconnect_count_total", "exchange" => exchange_name.to_string())
+        .increment(0);
+}

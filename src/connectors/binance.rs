@@ -30,7 +30,7 @@ use tokio::time::{Duration, sleep};
 use tokio_tungstenite::connect_async;
 use tokio_tungstenite::tungstenite::Message;
 
-use crate::types::{Exchange, Side, Trade, now_millis};
+use crate::types::{Exchange, Side, Trade, init_metrics, now_millis};
 
 pub const BINANCE_SPOT_WS_URL: &str = "wss://stream.binance.com:9443";
 const BINANCE_LIVENESS_TIMEOUT: Duration = Duration::from_secs(240);
@@ -77,16 +77,20 @@ fn normalize_symbol(symbol: &str) -> String {
 pub async fn run(tx: mpsc::Sender<Trade>, ws_url: &str) -> anyhow::Result<()> {
     let mut backoff = backoff_initial();
 
+    init_metrics("binance");
+
     loop {
         match run_session(&tx, ws_url).await {
             Ok(()) => {
                 // Stream emded cleanly (rare) -> reset backoff and reconnect
                 tracing::warn!("binance session ended cleanly, reconnecting");
+                metrics::gauge!("exchange_connected", "exchange" => "binance").set(0.0);
                 backoff = backoff_initial();
             }
             Err(e) => {
                 metrics::counter!("reconnect_count_total", "exchange" => "binance").increment(1);
                 tracing::warn!(error= %e, backoff_ms = backoff.as_millis(), "binance session failed");
+                metrics::gauge!("exchange_connected", "exchange" => "binance").set(0.0);
                 tokio::time::sleep(backoff).await;
                 backoff = next_backoff(backoff);
             }
@@ -115,6 +119,7 @@ pub async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<
     let url = format!("{}/ws/btcusdt@trade", url);
     let (mut ws_stream, _) = connect_async(url).await?;
     tracing::info!("websocket connected");
+    metrics::gauge!("exchange_connected", "exchange" => "binance").set(1.0);
 
     loop {
         tokio::select! {
@@ -123,7 +128,7 @@ pub async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<
                     Some(Ok(Message::Text(text))) => {
                         let deser_trade: BinanceTrade = serde_json::from_slice(text.as_bytes())?;
                         let trade: Trade = deser_trade.into();
-                        
+
                         metrics::counter!("trades_received_total", "exchange" => "binance").increment(1);
                         metrics::histogram!("e2e_latency_ms", "exchange" => "binance").record((trade.recv_ts_ms - trade.exchange_ts_ms) as f64);
 

@@ -27,7 +27,7 @@ use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
 
-use crate::types::{Exchange, Side, Trade, now_millis};
+use crate::types::{Exchange, Side, Trade, init_metrics, now_millis};
 
 pub const KRAKEN_MARKET_DATA_WS_URL: &str = "wss://ws.kraken.com/v2";
 const KRAKEN_LIVENESS_TIMEOUT: Duration = Duration::from_secs(15);
@@ -76,16 +76,20 @@ impl From<KrakenTrade> for crate::types::Trade {
 pub async fn run(tx: mpsc::Sender<Trade>, ws_url: &str) -> anyhow::Result<()> {
     let mut backoff = backoff_initial();
 
+    init_metrics("kraken");
+
     loop {
         match run_session(&tx, ws_url).await {
             Ok(()) => {
                 // Stream emded cleanly (rare) -> reset backoff and reconnect
                 tracing::warn!("kraken session ended cleanly, reconnecting");
+                metrics::gauge!("exchange_connected", "exchange" => "kraken").set(0.0);
                 backoff = backoff_initial();
             }
             Err(e) => {
                 metrics::counter!("reconnect_count_total", "exchange" => "kraken").increment(1);
                 tracing::warn!(error= %e, backoff_ms = backoff.as_millis(), "kraken session failed");
+                metrics::gauge!("exchange_connected", "exchange" => "kraken").set(0.0);
                 tokio::time::sleep(backoff).await;
                 backoff = next_backoff(backoff);
             }
@@ -153,6 +157,7 @@ async fn handle_message(
             if success {
                 tracing::info!("Kraken subscription confirmed");
                 *subscribed = true;
+                metrics::gauge!("exchange_connected", "exchange" => "kraken").set(1.0);
             } else {
                 anyhow::bail!("Kraken subscription failed: {}", text);
             }
