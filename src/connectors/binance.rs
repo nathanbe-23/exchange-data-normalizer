@@ -69,6 +69,7 @@ impl From<BinanceTrade> for crate::types::Trade {
 fn normalize_symbol(symbol: &str) -> String {
     match symbol {
         "BTCUSDT" => "BTC/USDT".to_string(),
+        "ETHUSDT" => "ETH/USDT".to_string(),
         _other => "".to_string(),
     }
 }
@@ -154,6 +155,7 @@ pub async fn run_session(tx: &mpsc::Sender<Trade>) -> anyhow::Result<()> {
     }
 }
 
+#[cfg(test)]
 mod tests {
     use super::*;
 
@@ -194,8 +196,31 @@ mod tests {
         assert_eq!(trade.side, Side::Sell);
     }
 
-    // TODO: additional Binance parse tests:
-    // - maker = false maps to Side::Buy (companion to existing maker=true → Sell test)
-    // - malformed JSON returns Err
-    // - missing required field (e.g., no "p") returns Err
+    #[test]
+    fn parse_message_maker_false() {
+        let d_trade = BinanceTrade {
+            symbol: "BTCUSDT".to_string(),
+            price: "0.001".to_string(),
+            quantity: "100".to_string(),
+            timestamp: 1672515782136,
+            maker: false,
+        };
+        let trade: Trade = d_trade.into();
+        assert_eq!(trade.side, Side::Buy);
+    }
+
+    #[test]
+    fn parse_message_wrong_json(){
+        // value of key 's' is not a string
+        let json_text: &str = r#"{"e": "trade", "s": BTCUSDT}"#;
+        assert!(serde_json::from_slice::<BinanceTrade>(json_text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn parse_message_missing_field(){
+        // field p is missing and is required for BinanceTrade
+        let json_text: &str = r#"{"s": "BTCUSDT", "q": "0.001", "T": 1, "m": false}"#;
+        assert!(serde_json::from_slice::<BinanceTrade>(json_text.as_bytes()).is_err());
+    }
+
 }
