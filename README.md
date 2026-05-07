@@ -1,5 +1,14 @@
-Initial rust package with template scaffolding for the exchange data normalizer.
+# exchange-data-normalizer
+A low-latency market data normalizer that ingests a websocket feed from multiple cryptocurrency exchanges and publishes a uniefied, sequence-consistent stream of trades to downstream consumers. Built in Rust with a focus on correctness under failure - reconnects, livenes detection, backpressure - so that strategies, risk systems and analytics can consume once canonical schema instead of N exchange-specific ones.
 
+## Why this exists
+Every exchange websocket API has its own quirks: different message shapes, symbol formats, timestamp encodings, heartbeat conventions. 
+A strategy or risk system that consumes raw exchange feeds ends up reimplementing per-exchange handling badle and inconsistently. This normalizer pushes that complexity into one process that handles it carefully once and exposes a unified canonical stream.
+
+## Latency numbers:
+Binance: n=34974, p50=108ms, p95=222ms, p99=332ms, max=656ms
+Kraken: n=718, p50=9ms, p95=20ms, p99=37ms, max=42ms
+Combined: n=35692, p50=108ms, p95=219ms, p99=332ms, max=656ms
 
 ## Connection lifecycle
 

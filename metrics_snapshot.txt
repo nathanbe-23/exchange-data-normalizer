@@ -1,0 +1,36 @@
+# TYPE trades_received_total counter
+trades_received_total{exchange="kraken"} 718
+trades_received_total{exchange="binance"} 34834
+
+# TYPE reconnect_count_total counter
+reconnect_count_total{exchange="kraken"} 0
+reconnect_count_total{exchange="binance"} 0
+
+# TYPE trades_dropped_total counter
+trades_dropped_total{exchange="binance"} 0
+trades_dropped_total{exchange="kraken"} 0
+
+# TYPE exchange_connected gauge
+exchange_connected{exchange="binance"} 1
+exchange_connected{exchange="kraken"} 1
+
+# TYPE e2e_latency_ms summary
+e2e_latency_ms{exchange="binance",quantile="0"} 107
+e2e_latency_ms{exchange="binance",quantile="0.5"} 108.99478212142407
+e2e_latency_ms{exchange="binance",quantile="0.9"} 305.9739642182219
+e2e_latency_ms{exchange="binance",quantile="0.95"} 331.9883952868566
+e2e_latency_ms{exchange="binance",quantile="0.99"} 344.9846814592996
+e2e_latency_ms{exchange="binance",quantile="0.999"} 346.02118949180044
+e2e_latency_ms{exchange="binance",quantile="1"} 346
+e2e_latency_ms_sum{exchange="binance"} 4172812
+e2e_latency_ms_count{exchange="binance"} 34834
+e2e_latency_ms{exchange="kraken",quantile="0"} 7
+e2e_latency_ms{exchange="kraken",quantile="0.5"} 8.000467695685316
+e2e_latency_ms{exchange="kraken",quantile="0.9"} 12.999358414978186
+e2e_latency_ms{exchange="kraken",quantile="0.95"} 12.999358414978186
+e2e_latency_ms{exchange="kraken",quantile="0.99"} 32.99975069216289
+e2e_latency_ms{exchange="kraken",quantile="0.999"} 32.99975069216289
+e2e_latency_ms{exchange="kraken",quantile="1"} 33
+e2e_latency_ms_sum{exchange="kraken"} 7539
+e2e_latency_ms_count{exchange="kraken"} 718
+
