@@ -81,7 +81,7 @@ pub struct Trade {
     pub recv_ts_ms: u64,
 }
 ```
-Three fields are interesting here: side and two timestamps. A trade is defined from the pov of the aggressor that takes liquidity away, so we generalize the side that it was on (buy or sell). We have two timestamps so we can track the time it takes for a trade to arrive. Note that recv_ts_ms - exchange_ts_ms can occasionally be negative if the exchange's clock runs ahead of ours; v1 does not perform clock-skew correction (see roadmap for the planned binance_clock_skew_ms metric).
+Three fields are interesting here: side and two timestamps. A trade is defined from the pov of the aggressor that takes liquidity away, so we generalize the side that it was on (buy or sell). We have two timestamps so we can track the time it takes for a trade to arrive. Note that recv_ts_ms - exchange_ts_ms can occasionally be negative if the exchange's clock runs ahead of ours; v1 does not perform clock-skew correction (see roadmap for the planned binance_clock_skew_ms metric). The `exchange_clock_skew_ms` metric exposes the offset directly so downstream consumers can decide how to handle it
 
 ## Connection lifecycle
 
@@ -167,6 +167,7 @@ The normalizer exposes Prometheus metrics on `:9090/metrics`:
 - `reconnect_count_total{exchange}` — counter, incremented per session failure
 - `exchange_connected{exchange}` — gauge, 1 when the connector has an active subscription, 0 otherwise
 - `e2e_latency_ms{exchange}` — histogram, distribution of `recv_ts_ms - exchange_ts_ms`
+- `exchange_clock_skew_ms{exchange}` — gauge, local_ts - exchange_ts from exchange signals. Positive means local clock ahead  
 
 ## Latency
 Measured over a 10-minute capture from a residential network in Paris. Numbers reflect WebSocket transit plus parse plus canonical conversion.
@@ -202,7 +203,6 @@ The following are explicitly out of scope for v1. Each represents a deliberate c
 
 ### Observability
 
-- Clock-skew gauge using Binance's ping payload (server-provided timestamp) to measure exchange↔client clock drift, exposed as binance_clock_skew_ms.
 - `/health` endpoint returning per-exchange connection state as JSON.
 - Per-symbol metrics, once symbol set is configurable.
 

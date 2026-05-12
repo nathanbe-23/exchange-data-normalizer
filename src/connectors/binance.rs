@@ -115,6 +115,10 @@ fn next_backoff(current: Duration) -> Duration {
     Duration::from_millis(doubled.saturating_add(jitter))
 }
 
+fn parse_ping_ts(payload: &[u8]) -> Option<u64> {
+    std::str::from_utf8(payload).ok()?.parse::<u64>().ok()
+}
+
 pub async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<()> {
     let url = format!("{}/ws/btcusdt@trade", url);
     let (mut ws_stream, _) = connect_async(url).await?;
@@ -145,7 +149,15 @@ pub async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<
                         }
                     }
                     Some(Ok(Message::Ping(payload))) => {
-                        tracing::debug!(payload = ?payload, "binance ping");
+                        if let Some(server_time_ts) = parse_ping_ts(&payload) {
+                            let local_time = now_millis();
+                            let time_diff = local_time - server_time_ts;
+                            metrics::gauge!("exchange_clock_skew_ms", "exchange" => "binance").set(time_diff as f64);
+                            tracing::trace!(server_time_ts, local_time, time_diff, "binance ping");
+
+                        } else {
+                            tracing::debug!(payload = ?payload, "unparseable binance ping");
+                        }
                     },
                     Some(Ok(Message::Pong(payload))) => {
                         tracing::trace!(payload_len = payload.len(), "binance pong");
@@ -234,5 +246,17 @@ mod tests {
         // field p is missing and is required for BinanceTrade
         let json_text: &str = r#"{"s": "BTCUSDT", "q": "0.001", "T": 1, "m": false}"#;
         assert!(serde_json::from_slice::<BinanceTrade>(json_text.as_bytes()).is_err());
+    }
+
+    #[test]
+    fn parse_binance_ping_payload() {
+        let msg = b"1778571445202";
+        let parsed = parse_ping_ts(msg);
+        assert_eq!(parsed, Some(1778571445202));
+    }
+
+    #[test]
+    fn rejects_non_numeric_ping_payload() {
+        assert_eq!(parse_ping_ts(b"not a number"), None);
     }
 }
