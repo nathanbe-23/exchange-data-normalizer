@@ -217,9 +217,11 @@ async fn dispatch_trades(
     for kt in trades {
         let trade: Trade = kt.into();
 
+        // Cast to i64 before subtraction: latency can be negative if exchange clock
+        // is ahead of ours (no clock-skew correction in v1, see roadmap).
+        let latency_ms = trade.recv_ts_ms as i64 - trade.exchange_ts_ms as i64;
         metrics::counter!("trades_received_total", "exchange" => "kraken").increment(1);
-        metrics::histogram!("e2e_latency_ms", "exchange" => "kraken")
-            .record((trade.recv_ts_ms - trade.exchange_ts_ms) as f64);
+        metrics::histogram!("e2e_latency_ms", "exchange" => "kraken").record(latency_ms as f64);
 
         if let Err(tokio::sync::mpsc::error::TrySendError::Full(_)) = tx.try_send(trade) {
             // Publisher is behind. Drop newest (this trade) rather than block,

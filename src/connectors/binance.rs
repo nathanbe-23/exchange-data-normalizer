@@ -129,8 +129,11 @@ pub async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<
                         let deser_trade: BinanceTrade = serde_json::from_slice(text.as_bytes())?;
                         let trade: Trade = deser_trade.into();
 
+                        // Cast to i64 before subtraction: latency can be negative if exchange clock
+                        // is ahead of ours (no clock-skew correction in v1, see roadmap).
+                        let latency_ms = trade.recv_ts_ms as i64 - trade.exchange_ts_ms as i64;
                         metrics::counter!("trades_received_total", "exchange" => "binance").increment(1);
-                        metrics::histogram!("e2e_latency_ms", "exchange" => "binance").record((trade.recv_ts_ms - trade.exchange_ts_ms) as f64);
+                        metrics::histogram!("e2e_latency_ms", "exchange" => "binance").record(latency_ms as f64);
 
                         if let Err(tokio::sync::mpsc::error::TrySendError::Full(_))= tx.try_send(trade) {
                             // Publisher is behind. Drop newest (this trade) rather than block,
