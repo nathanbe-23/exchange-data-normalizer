@@ -140,10 +140,14 @@ async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<()> 
         tokio::select! {
             _ = ping_timer.tick() => {
                 let ping_id: u64 = PING_REQ_ID.fetch_add(1, Ordering::Relaxed);
-                let send_ts = now_millis();
+                let now_send_ts = now_millis();
                 let ping_msg = serde_json::json!({"method": "ping", "req_id": ping_id});
                 ws_stream.send(Message::Text(ping_msg.to_string().into())).await?;
-                pending_pings.insert(ping_id, send_ts);
+                pending_pings.insert(ping_id, now_send_ts);
+
+                // Prune to old pending pings in case we missed pongs (more for correctness than real situation)
+                pending_pings.retain(|_, send_ts| now_send_ts - *send_ts < 300_000); // 5 min
+
             }
             maybe_msg = ws_stream.next() => {
                 match maybe_msg {
