@@ -81,7 +81,7 @@ pub struct Trade {
     pub recv_ts_ms: u64,
 }
 ```
-Three fields are interesting here: side and two timestamps. A trade is defined from the pov of the aggressor that takes liquidity away, so we generalize the side that it was on (buy or sell). We have two timestamps so we can track the time it takes for a trade to arrive. Note that recv_ts_ms - exchange_ts_ms can occasionally be negative if the exchange's clock runs ahead of ours; v1 does not perform clock-skew correction (see roadmap for the planned binance_clock_skew_ms metric). The `exchange_clock_skew_ms` metric exposes the offset directly so downstream consumers can decide how to handle it
+Three fields are interesting here: side and two timestamps. A trade is defined from the pov of the aggressor that takes liquidity away, so we generalize the side that it was on (buy or sell). We have two timestamps so we can track the time it takes for a trade to arrive. Note that recv_ts_ms - exchange_ts_ms can occasionally be negative if the exchange's clock runs ahead of ours; v1 does not perform clock-skew correction (see roadmap for the planned binance_clock_skew_ms metric). The `exchange_clock_skew_ms` metric exposes the offset per exchange (via different protocol mechanisms) directly so downstream consumers can decide how to handle it
 
 ## Connection lifecycle
 
@@ -125,6 +125,12 @@ up. The jitter prevents thundering-herd reconnect storms if multiple
 clients are reconnecting after a server restart.
 
 ### Known limitations
+
+Kraken uses two distinct protocol mechanisms that this connector handles separately:
+**heartbeats** (server-initiated, ~1s) serve as the liveness signal and feed the
+15s liveness timer; **ping/pong** (client-initiated, every 60s) is used purely for
+clock-skew measurement and RTT diagnostics. Heartbeats are higher-cadence and free
+on the wire; ping/pong is richer but costlier, so the roles aren't interchangeable.
 
 The current liveness check detects dead **connections** but not dead
 **subscriptions**. Heartbeats and pings keep arriving on a live socket
@@ -227,3 +233,4 @@ The following are explicitly out of scope for v1. Each represents a deliberate c
 ### Exchange documentation
 - Binance Spot WebSocket Streams — https://developers.binance.com/docs/binance-spot-api-docs/web-socket-streams
 - Kraken WebSocket API v2 (Trade channel) — https://docs.kraken.com/api/docs/websocket-v2/trade
+- Kraken WebSocket API v2 (Ping) — https://docs.kraken.com/api/docs/websocket-v2/ping
