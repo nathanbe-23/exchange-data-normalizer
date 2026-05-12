@@ -132,8 +132,6 @@ async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<()> 
         .await?;
 
     let mut subscribed = false;
-    // TODO: use last_hb_ts as liveness signal for reconnect -> still needed after pong parsing?
-    let mut _last_hb_ts: u64 = 0;
 
     let mut ping_timer = tokio::time::interval(KRAKEN_PING_TIMEOUT);
     loop {
@@ -151,7 +149,7 @@ async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<()> 
             }
             maybe_msg = ws_stream.next() => {
                 match maybe_msg {
-                    Some(Ok(Message::Text(text))) => handle_message(&text, tx, &mut subscribed, &mut _last_hb_ts, &mut pending_pings).await?,
+                    Some(Ok(Message::Text(text))) => handle_message(&text, tx, &mut subscribed, &mut pending_pings).await?,
                     Some(Ok(_)) => continue,
                     Some(Err(e)) => return Err(e.into()),
                     None => return Ok(()), // Stream ended, outer loop reconnects
@@ -169,7 +167,6 @@ async fn handle_message(
     text: &str,
     tx: &mpsc::Sender<Trade>,
     subscribed: &mut bool, // write on ack
-    _last_hb_ts: &mut u64,
     pending_pings: &mut HashMap<u64, u64>,
 ) -> anyhow::Result<()> {
     match parse_message(text)? {
@@ -203,8 +200,12 @@ async fn handle_message(
             dispatch_trades(data, tx, *subscribed).await;
         }
         DispatchedMessage::KrakenChannel(KrakenMessage::Heartbeat) => {
-            *_last_hb_ts = now_millis();
-            tracing::trace!("heartbeat");
+            // Trace heartbeats for:
+            // - Documentation as we rely on these for subscription liveness 
+            //      -> otherwise timeout is triggered in run_session
+            // - debugging
+            // - future-use (gap detection)
+            tracing::trace!("heartbeat");  
         }
         DispatchedMessage::KrakenChannel(KrakenMessage::Other) => {}
         DispatchedMessage::Unknown(value) => {
