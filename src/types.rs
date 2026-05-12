@@ -39,5 +39,4 @@ pub fn init_metrics(exchange_name: &str) {
     metrics::counter!("reconnect_count_total", "exchange" => exchange_name.to_string())
         .increment(0);
     metrics::gauge!("exchange_clock_skew_ms", "exchange" => exchange_name.to_string()).set(0.0);
-
 }

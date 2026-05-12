@@ -23,6 +23,7 @@
 
 use futures_util::{SinkExt, StreamExt};
 use serde::Deserialize;
+use std::sync::atomic::{AtomicU64, Ordering};
 use tokio::sync::mpsc;
 use tokio::time::sleep;
 use tokio_tungstenite::{connect_async, tungstenite::Message};
@@ -31,6 +32,8 @@ use crate::types::{Exchange, Side, Trade, init_metrics, now_millis};
 
 pub const KRAKEN_MARKET_DATA_WS_URL: &str = "wss://ws.kraken.com/v2";
 const KRAKEN_LIVENESS_TIMEOUT: Duration = Duration::from_secs(15);
+const KRAKEN_PING_TIMEOUT: Duration = Duration::from_secs(60);
+static PING_REQ_ID: AtomicU64 = AtomicU64::new(1);
 
 #[derive(Debug, Deserialize)]
 #[serde(tag = "channel")]
@@ -98,7 +101,7 @@ pub async fn run(tx: mpsc::Sender<Trade>, ws_url: &str) -> anyhow::Result<()> {
 }
 
 use rand::RngExt;
-use std::time::Duration;
+use std::{collections::HashMap, time::Duration};
 
 const INITIAL_BACKOFF_MS: u64 = 500;
 const MAX_BACKOFF_MS: u64 = 30_000;
@@ -121,18 +124,30 @@ async fn run_session(tx: &mpsc::Sender<Trade>, url: &str) -> anyhow::Result<()> 
         "method": "subscribe",
         "params": {"channel": "trade", "symbol": ["BTC/USD"]}
     });
+
+    let mut pending_pings: HashMap<u64, u64> = HashMap::new();
+
     ws_stream
         .send(Message::Text(subscribe.to_string().into()))
         .await?;
 
     let mut subscribed = false;
-    // TODO: use last_hb_ts as liveness signal for reconnect
+    // TODO: use last_hb_ts as liveness signal for reconnect -> still needed after pong parsing?
     let mut _last_hb_ts: u64 = 0;
+
+    let mut ping_timer = tokio::time::interval(KRAKEN_PING_TIMEOUT);
     loop {
         tokio::select! {
+            _ = ping_timer.tick() => {
+                let ping_id: u64 = PING_REQ_ID.fetch_add(1, Ordering::Relaxed);
+                let send_ts = now_millis();
+                let ping_msg = serde_json::json!({"method": "ping", "req_id": ping_id});
+                ws_stream.send(Message::Text(ping_msg.to_string().into())).await?;
+                pending_pings.insert(ping_id, send_ts);
+            }
             maybe_msg = ws_stream.next() => {
                 match maybe_msg {
-                    Some(Ok(Message::Text(text))) => handle_message(&text, tx, &mut subscribed, &mut _last_hb_ts).await?,
+                    Some(Ok(Message::Text(text))) => handle_message(&text, tx, &mut subscribed, &mut _last_hb_ts, &mut pending_pings).await?,
                     Some(Ok(_)) => continue,
                     Some(Err(e)) => return Err(e.into()),
                     None => return Ok(()), // Stream ended, outer loop reconnects
@@ -151,6 +166,7 @@ async fn handle_message(
     tx: &mpsc::Sender<Trade>,
     subscribed: &mut bool, // write on ack
     _last_hb_ts: &mut u64,
+    pending_pings: &mut HashMap<u64, u64>,
 ) -> anyhow::Result<()> {
     match parse_message(text)? {
         DispatchedMessage::SubscriptionAck { success, text } => {
@@ -160,6 +176,23 @@ async fn handle_message(
                 metrics::gauge!("exchange_connected", "exchange" => "kraken").set(1.0);
             } else {
                 anyhow::bail!("Kraken subscription failed: {}", text);
+            }
+        }
+        DispatchedMessage::Pong { time_in, req_id } => {
+            if let Some(local_send_ts) = pending_pings.remove(&req_id) {
+                let now_ts = now_millis();
+                let rtt_ts = now_ts - local_send_ts;
+                if let Ok(server_dt) = chrono::DateTime::parse_from_rfc3339(&time_in) {
+                    let server_time_in_ms = server_dt.timestamp_millis();
+
+                    // Cristian's algorithm: assume request took RTT/2 to reach server
+                    let est_server_now_ts = server_time_in_ms - (rtt_ts / 2) as i64;
+
+                    let skew = local_send_ts as i64 - est_server_now_ts;
+                    metrics::gauge!("exchange_clock_skew_ms", "exchange" => "kraken")
+                        .set(skew as f64);
+                    tracing::debug!(skew, rtt_ts, "kraken ping round-trip");
+                }
             }
         }
         DispatchedMessage::KrakenChannel(KrakenMessage::Trade { data }) => {
@@ -180,6 +213,7 @@ async fn handle_message(
 enum DispatchedMessage {
     KrakenChannel(KrakenMessage),
     SubscriptionAck { success: bool, text: String },
+    Pong { time_in: String, req_id: u64 },
     Unknown(serde_json::Value),
 }
 
@@ -195,6 +229,16 @@ fn parse_message(text: &str) -> anyhow::Result<DispatchedMessage> {
         return Ok(DispatchedMessage::SubscriptionAck {
             success,
             text: (text.to_string()), // for error logging
+        });
+    }
+
+    // Pong msg
+    if value.get("method").and_then(|v| v.as_str()) == Some("pong") {
+        let time_in = value.get("time_in").and_then(|v| v.as_str()).unwrap();
+        let req_id = value.get("req_id").and_then(|v| v.as_u64()).unwrap();
+        return Ok(DispatchedMessage::Pong {
+            time_in: time_in.to_string(),
+            req_id,
         });
     }
 
